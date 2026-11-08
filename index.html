@@ -1,1 +1,198 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ibamFINANCE</title>
+    <!-- PWA Settings untuk iOS Home Screen -->
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="apple-mobile-web-app-title" content="ibamFINANCE">
+
+    <!-- Tailwind CSS & Chart.js -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;600;700;800&display=swap" rel="stylesheet">
+
+    <!-- Firebase SDK (Version 10.7.1) -->
+    <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-auth-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore-compat.js"></script>
+
+    <style>
+        body { font-family: 'Plus Jakarta Sans', sans-serif; -webkit-tap-highlight-color: transparent; }
+    </style>
+</head>
+<body class="bg-slate-950 text-white min-h-screen pb-12 select-none">
+
+    <!-- Header -->
+    <header class="p-6 flex justify-between items-center border-b border-slate-800/60 sticky top-0 bg-slate-950/80 backdrop-blur-md z-50">
+        <div>
+            <h1 class="text-2xl font-extrabold bg-gradient-to-r from-emerald-400 to-cyan-400 bg-clip-text text-transparent">ibamFINANCE</h1>
+            <p id="userGreeting" class="text-xs text-slate-400 mt-0.5">Silakan Login Google</p>
+        </div>
+        <button id="authBtn" onclick="handleAuth()" class="bg-slate-900 border border-slate-700 px-4 py-2 rounded-full text-xs font-semibold flex items-center gap-2 hover:bg-slate-800 active:scale-95 transition">
+            <span id="authStatusDot" class="w-2 h-2 rounded-full bg-rose-500"></span>
+            <span id="authBtnText">Google Login</span>
+        </button>
+    </header>
+
+    <main class="max-w-md mx-auto p-5 space-y-6">
+        <!-- Dashboard Card Saldo -->
+        <div class="relative overflow-hidden bg-gradient-to-br from-slate-900 via-slate-900 to-slate-800 border border-slate-800 p-6 rounded-3xl shadow-2xl">
+            <div class="absolute -right-10 -bottom-10 w-32 h-32 bg-emerald-500/10 rounded-full blur-2xl"></div>
+            <p class="text-xs font-medium text-slate-400 uppercase tracking-wider">Total Saldo Kamu</p>
+            <h2 id="totalBalance" class="text-3xl font-extrabold mt-2 tracking-tight">Rp 0</h2>
+            <div class="mt-4 flex items-center justify-between">
+                <span class="text-xs text-emerald-400 bg-emerald-500/10 px-3 py-1 rounded-full font-semibold border border-emerald-500/20">
+                    ↑ Integrated Cloud
+                </span>
+                <span class="text-xs text-slate-500">Live Sync</span>
+            </div>
+        </div>
+
+        <!-- Analisis Pengeluaran Mingguan -->
+        <div class="bg-slate-900/60 border border-slate-800/80 p-5 rounded-3xl">
+            <h3 class="text-sm font-bold text-slate-300 mb-4">Analisis Pengeluaran Mingguan</h3>
+            <div class="relative h-48">
+                <canvas id="weeklyChart"></canvas>
+            </div>
+        </div>
+
+        <!-- Tombol Tambah Transaksi -->
+        <button onclick="addTransaction()" class="w-full bg-gradient-to-r from-emerald-500 to-teal-600 hover:from-emerald-400 hover:to-teal-500 text-white font-bold py-4 rounded-2xl shadow-lg shadow-emerald-600/20 active:scale-95 transition flex items-center justify-center gap-2">
+            <svg class="w-6 h-6" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M12 4.5v15m7.5-7.5h-15"></path></svg>
+            Tambah Transaksi Baru
+        </button>
+    </main>
+
+    <script>
+        // --- 1. KONFIGURASI FIREBASE ---
+        const firebaseConfig = {
+            apiKey: "PASTE_API_KEY_KAMU",
+            authDomain: "PASTE_AUTH_DOMAIN_KAMU",
+            projectId: "PASTE_PROJECT_ID_KAMU",
+            storageBucket: "PASTE_STORAGE_BUCKET_KAMU",
+            messagingSenderId: "PASTE_SENDER_ID_KAMU",
+            appId: "PASTE_APP_ID_KAMU"
+        };
+
+        firebase.initializeApp(firebaseConfig);
+        const auth = firebase.auth();
+        const db = firebase.firestore();
+
+        let currentUser = null;
+        let weeklyChartInstance = null;
+
+        // --- 2. EFEK SUARA & HAPTIK ---
+        function playClickSound() {
+            if (navigator.vibrate) navigator.vibrate(30);
+            let audio = new Audio('https://assets.mixkit.co/active_storage/sfx/2568/2568-preview.mp3');
+            audio.volume = 0.3;
+            audio.play().catch(() => {});
+        }
+
+        // --- 3. CHART ANALISIS ---
+        function initChart(dataDays = [0,0,0,0,0,0,0]) {
+            const ctx = document.getElementById('weeklyChart').getContext('2d');
+            if(weeklyChartInstance) weeklyChartInstance.destroy();
+
+            weeklyChartInstance = new Chart(ctx, {
+                type: 'bar',
+                data: {
+                    labels: ['Sen', 'Sel', 'Rab', 'Kam', 'Jum', 'Sab', 'Min'],
+                    datasets: [{
+                        label: 'Pengeluaran',
+                        data: dataDays,
+                        backgroundColor: '#10b981',
+                        borderRadius: 8,
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: { legend: { display: false } },
+                    scales: {
+                        x: { grid: { display: false }, ticks: { color: '#64748b' } },
+                        y: { grid: { color: '#1e293b' }, ticks: { color: '#64748b' } }
+                    }
+                }
+            });
+        }
+        initChart();
+
+        // --- 4. AUTHENTICATION (GOOGLE LOGIN) ---
+        function handleAuth() {
+            playClickSound();
+            if (currentUser) {
+                auth.signOut();
+            } else {
+                const provider = new firebase.auth.GoogleAuthProvider();
+                auth.signInWithPopup(provider).catch(error => alert(error.message));
+            }
+        }
+
+        auth.onAuthStateChanged(user => {
+            currentUser = user;
+            const statusDot = document.getElementById('authStatusDot');
+            const btnText = document.getElementById('authBtnText');
+            const greeting = document.getElementById('userGreeting');
+
+            if (user) {
+                statusDot.className = "w-2 h-2 rounded-full bg-emerald-500 animate-pulse";
+                btnText.innerText = "Logout";
+                greeting.innerText = "Halo, " + user.displayName.split(' ')[0] + " 👋";
+                loadUserData(user.uid);
+            } else {
+                statusDot.className = "w-2 h-2 rounded-full bg-rose-500";
+                btnText.innerText = "Google Login";
+                greeting.innerText = "Silakan Login Google";
+                document.getElementById('totalBalance').innerText = "Rp 0";
+                initChart([0,0,0,0,0,0,0]);
+            }
+        });
+
+        // --- 5. SIMPAN & BACA DATA DATABASE CLOUD ---
+        function loadUserData(userId) {
+            db.collection("users").doc(userId).collection("expenses")
+              .onSnapshot(snapshot => {
+                  let total = 0;
+                  let daysData = [0,0,0,0,0,0,0];
+
+                  snapshot.forEach(doc => {
+                      const data = doc.data();
+                      total += data.amount;
+                      if(data.dayIndex !== undefined) daysData[data.dayIndex] += data.amount;
+                  });
+
+                  document.getElementById('totalBalance').innerText = "Rp " + total.toLocaleString('id-ID');
+                  initChart(daysData);
+              });
+        }
+
+        function addTransaction() {
+            playClickSound();
+            if (!currentUser) {
+                alert("Silakan Login Google terlebih dahulu!");
+                return;
+            }
+
+            let amountStr = prompt("Masukkan nominal pengeluaran (Rp):");
+            if (!amountStr) return;
+            let amount = parseInt(amountStr);
+
+            let dayIndex = new Date().getDay(); 
+            dayIndex = dayIndex === 0 ? 6 : dayIndex - 1; 
+
+            db.collection("users").doc(currentUser.uid).collection("expenses").add({
+                amount: amount,
+                dayIndex: dayIndex,
+                timestamp: firebase.firestore.FieldValue.serverTimestamp()
+            }).then(() => {
+                alert("Transaksi berhasil dicatat ke Google Cloud!");
+            });
+        }
+    </script>
+</body>
+</html>
 
